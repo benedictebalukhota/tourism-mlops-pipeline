@@ -1,0 +1,90 @@
+name: Tourism MLOps Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.10"
+  HF_USERNAME: ${{ secrets.HF_USERNAME }}
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+jobs:
+  data-registration:
+    name: Data Registration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: python tourism_project/data/data_register.py
+
+  data-preparation:
+    name: Data Preparation
+    runs-on: ubuntu-latest
+    needs: data-registration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: python tourism_project/model_building/prep.py
+
+  model-training:
+    name: Model Building and Registration
+    runs-on: ubuntu-latest
+    needs: data-preparation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: python tourism_project/model_building/train.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: training-artifacts
+          path: |
+            tourism_project/model_building/artifacts/
+            mlruns/
+          retention-days: 14
+          if-no-files-found: warn
+
+  deployment:
+    name: Deploy to Hugging Face Space
+    runs-on: ubuntu-latest
+    needs: model-training
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: python tourism_project/deployment/hosting.py
+      - run: |
+          echo "### Deployment complete :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "App: https://huggingface.co/spaces/${HF_USERNAME}/tourism-wellness-app" >> $GITHUB_STEP_SUMMARY
+          echo "Model: https://huggingface.co/${HF_USERNAME}/tourism-wellness-model" >> $GITHUB_STEP_SUMMARY
